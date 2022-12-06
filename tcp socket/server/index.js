@@ -1,12 +1,71 @@
+const http = require('http');
+const fs = require('fs'); //работа с файлами
+const path = require('path'); //работа с путями
+const os = require('os');
 const net = require('net');
 const port = 25000;
-const host = '10.4.9.117';
+let host = '10.4.9.117';
+const port_http=8080;
+const roles=["manager", "admin"];
+
+const ip_adresses = os.networkInterfaces();
+for(const i in ip_adresses){
+	for(const k in ip_adresses[i]){
+		if(ip_adresses[i][k].family == 'IPv4'){
+			if(ip_adresses[i][k].address!="127.0.0.1"){
+				host=ip_adresses[i][k].address;
+				console.log("HTTP Server running at http://" + host + ':' + port_http)
+			}
+		}
+	}
+}
 const server = net.createServer();
 server.listen(port, host, () => {
-console.log('TCP Server is running on port ' + port + '.');
+console.log('TCP Server running at ' + host + ' port '+ port);
 });
-let id_cv=0;
-let converters = [];
+
+const server_http = http.createServer((req, res) => {
+    let first_url=req.url;
+	if(req.method=='GET'){ // запросы страниц
+		send_file( res, first_url);
+	}
+	if(req.method=='POST'){ // запросы API
+		send_post(req, res);
+	}
+}); 
+server_http.listen(port_http);
+
+function send_post(req, res){
+    let body = [];
+    req.on('error', function(err) {
+        console.error(err);
+    }).on('data', function(chunk) {
+        body.push(chunk);
+    }).on('end', function() {
+        body = Buffer.concat(body).toString();
+        try {
+            let obj={}; 
+			let data = JSON.parse(body);
+			obj.role=path.basename(req.url);
+			if(roles.includes(obj.role)){
+				if(data.command in api){
+					api[data.command].start(req, res, data, obj);
+				}else{
+					functions.answer_send(res, "no the command");
+				}
+			}else{
+				functions.answer_send(res, "no the role");
+			}	
+        } catch (e) {
+            console.error(e);
+        }
+        res.on('error', function(err) {
+            console.error(err);
+        });
+    });	
+}
+
+let converters = new Map();
 
 server.on('connection', function(sock) {
 	//let id=num++;
@@ -53,36 +112,39 @@ let commands={
 	new_sock:{
 		start(obj){
 			obj.cmd=commands.new_sock.short_info;
-			let lnk=obj;
-			let timerId = setTimeout(tmr, 100);
-			function tmr(){
-				commands.new_sock.tmr(lnk);
-			}
+			let timerId = setTimeout(commands.new_sock.tmr, 100, obj);
 		},
 		tmr(obj){
+			obj.tmr= setTimeout(commands.new_sock.out, 1000, obj);
 			obj.cmd=commands.new_sock.full_info;
 			commands.full_info(obj);
 		},
 		full_info(obj){
-			obj.full_info=String(obj.data);
+			clearTimeout(obj.tmr);
+			obj.tmr= setTimeout(commands.new_sock.out, 1000, obj);
+			function out(){commands.new_sock.out(obj);}
+			obj.converter={};
+			obj.converter.full_info=String(obj.data);
 			obj.cmd=commands.new_sock.short_info;
 			commands.short_info(obj);		
 		},
 		short_info(obj){
+			clearTimeout(obj.tmr);
+			obj.tmr= setTimeout(commands.new_sock.out, 1000, obj);
+			function out(){commands.new_sock.out(obj);}
 			if(obj.data.length){
 				let arr = String(obj.data).split(' ');
-				obj.model=arr[0];
+				obj.converter.model=arr[0];
 				if(arr[1].length){
-					console.log(arr[1]);
 					let arr1=arr[1].split(',');
 					if(arr1[0]){
-						obj.number=arr1[0].split(':')[1];
+						obj.converter.number=arr1[0].split(':')[1];
 					}
 					if(arr1[1]){
-						obj.mode=arr1[1].split(':')[1];
+						obj.converter.mode=arr1[1].split(':')[1];
 					}
 					if(arr1[2]){
-						obj.key=arr1[2].split('\r')[0];
+						obj.converter.key=arr1[2].split('\r')[0];
 					}
 				}
 			}
@@ -100,17 +162,22 @@ let commands={
 							lic.type=Number(ss[0]);
 							lic.controllers=ss[1].split('/')[0].split('(')[1];
 							lic.cards=ss[1].split('/')[1].split(')')[0];
-							console.log(lic);
 						}
 					}
 				}
 			}
-			obj.lic=lic;
-			console.log('end');
-		}
+			obj.converter.lic=lic;
+			obj.converter.obj=obj;
+			converters.set(obj.converter.model+obj.converter.number, obj.converter)
+			
+		},
+		out(obj){
+			//console.log("out");
+			//console.log(converters.size);
+		},
 	},
 	answer(data, obj){
-		console.log(String(data));
+		//console.log(String(data));
 		obj.data=data;
 		obj.cmd(obj);
 	},
@@ -129,6 +196,29 @@ let commands={
 	
 }
 
+let api={
+	get_converters:{
+		start(req, res, data, obj){
+			console.log(data.password);
+			let asd=String(converters.size);
+			console.log(asd);
+			functions.answer_send(res, asd);
+		}
+	},	
+}
+
+let functions={
+	answer_send(res, msg){ // 2_
+		res.writeHead(200);
+		if(typeof(msg)=="object"){
+			res.end(JSON.stringify(msg));
+			//console.log("send object");
+		}else{
+			res.end(msg);
+			//console.log(msg);
+		}
+	},
+}
 
 //let timerId_0 = setTimeout(adv, 8000);
 //let timerId = setTimeout(send, 4000);

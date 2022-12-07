@@ -27,8 +27,7 @@ console.log('TCP Server running at ' + host + ' port '+ port);
 const server_http = http.createServer((req, res) => {
     let first_url=req.url;
 	if(req.method=='GET'){ // запросы страниц
-		//send_file( res, first_url);
-		console.log('get -'+ first_url);
+		send_file( res, first_url);
 	}
 	if(req.method=='POST'){ // запросы API
 		send_post(req, res);
@@ -66,7 +65,7 @@ function send_post(req, res){
     });	
 }
 
-let converters = {};
+let converters = new Map();
 
 server.on('connection', function(sock) {
 	//let id=num++;
@@ -107,6 +106,7 @@ server.on('connection', function(sock) {
 //	параметры
 //	дополнительные данные
 
+//по имени операция (команда) можно определить и команда - тип.
 
 let commands={
 	new_sock:{
@@ -168,7 +168,7 @@ let commands={
 			}
 			obj.converter.lic=lic;
 			obj.converter.obj=obj;
-			converters[obj.converter.model+"_"+obj.converter.number]= obj.converter;
+			converters.set(obj.converter.model+obj.converter.number, obj.converter)
 			
 		},
 		out(obj){
@@ -199,11 +199,9 @@ let commands={
 let api={
 	get_converters:{
 		start(req, res, data, obj){
-			//console.log(data.password);
-			let asd=[];
-			for(let key in converters){
-			asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].obj.socket.remoteAddress}  );
-			}
+			console.log(data.password);
+			let asd=String(converters.size);
+			console.log(asd);
 			functions.answer_send(res, asd);
 		}
 	},	

@@ -245,6 +245,30 @@ let functions={
 			console.log("buf_in is not /4");
 		}
 	},
+	in5out4(buf_in){
+		if( !(buf_in.byteLength % 5)){ //проверяем кратность 5
+			let buffer = new ArrayBuffer(4*buf_in.byteLength/5)//расчитываем размер для out
+			let in_8 = new Uint8Array(buf_in);  //создаем out
+			let out_8 = new Uint8Array(buffer);  //создаем out
+			let i=0;
+			let k=0;
+			while (i<in_8.length){
+				for(let j=0;j<5;j++){
+					if(in_8[i+j]&0x80){
+						in_8[i+j]=in_8[i+j]^0xCA;
+					}
+				}
+				for(let j=0;j<4;j++){
+					out_8[k+j]=in_8[i+j]|((( in_8[i+4]>>j)&1)<<7);
+				}
+				i=i+5;
+				k=k+4;
+			}	
+			return(out_8);
+		}else{
+			console.log("buf_in is not /5");
+		}
+	},
 }
 
 //let timerId_0 = setTimeout(adv, 8000);

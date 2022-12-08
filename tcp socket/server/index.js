@@ -220,6 +220,31 @@ let functions={
 			//console.log(msg);
 		}
 	},
+	in4out5(buf_in){
+		if( !(buf_in.byteLength % 4)){ //проверяем кратность 4
+			let buffer = new ArrayBuffer(5*buf_in.byteLength/4)//расчитываем размер для out
+			let in_8 = new Uint8Array(buf_in);  //создаем out
+			let out_8 = new Uint8Array(buffer);  //создаем out
+			let i=0;
+			let k=0;
+			while (i<in_8.length){
+				out_8[k]=((in_8[i]&0x80)>>4)+((in_8[i+1]&0x80)>>5)+((in_8[i+2]&0x80)>>6)+((in_8[i+3]&0x80)>>7);
+				for(let j=0;j<4;j++){
+					out_8[k+j+1]=in_8[i+j]&0x7F;
+				}
+				for(let j=0;j<5;j++){
+					if(out_8[k+j]<48){
+						out_8[k+j]=out_8[k+j]^0xCA;
+					}
+				}
+				i=i+4;
+				k=k+5;
+			}	
+			return(out_8);
+		}else{
+			console.log("buf_in is not /4");
+		}
+	},
 }
 
 //let timerId_0 = setTimeout(adv, 8000);

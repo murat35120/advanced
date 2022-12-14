@@ -260,7 +260,7 @@ let commands={
 				}
 				lic_full = new Uint8Array(arr);
 			}	
-			obj.converter.cmd_id=obj.converter.cmd_id+13;
+			obj.converter.cmd_id++;
 			let buffer = new Uint8Array([0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x02, obj.converter.lic_num, 0x00, 0x00] );
 			let blast = new Uint8Array([0x00, 0x00] );
 			bfull.set(buffer,1);
@@ -287,7 +287,122 @@ let commands={
 			obj.back(obj);
 		}
 	},
-	
+	controllers_list:{
+		start(req, res, conv, lic_num, func){
+			let obj=converters[conv].obj;	
+			obj.converter.cmd_id++;
+			let bfull = new Uint8Array([0x20, 0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x0D] );
+			let ttt=bfull.subarray(1,9);
+			//console.log(ttt.length);
+			let tmp=functions.check_out(ttt);
+			let tmp2=functions.in4out5(tmp);
+			bfull.set(tmp2,1);
+			//console.log(bfull);
+			obj.back=func;
+			obj.cmd=commands.controllers_list.end;
+			obj.socket.write(bfull);
+			obj.req=req;
+			obj.res=res;
+		},
+		end(obj){
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			let asd=functions.in5out4(ans);
+			let tmp=asd.subarray(8,22);
+			let tmp1=[];
+			//console.log(asd.subarray(8,21).length);
+			for(let i=0; i<tmp.length; i++){
+				let sh= new Uint8Array([0x1]);
+				let k;
+				if(tmp[i]){
+					for(let j=0; j<8; j++){
+						k=tmp[i]&sh;
+						if(k){
+							tmp1.push(i*8+k+1);
+						}
+						sh=sh<<1;
+					}
+				}
+			}
+			obj.ansver=tmp1;
+			obj.back(obj);
+		}
+	},
+	controller_details:{
+		start(req, res, conv, lic_num, controller_addr, func){
+			let obj=converters[conv].obj;	
+			obj.converter.cmd_id++;
+			let bfull = new Uint8Array([0x20, 0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x00, controller_addr, 0x00, 0x00, 0x00, 0x00, 0x0D] );
+			let ttt=bfull.subarray(1,9);
+			//console.log(ttt.length);
+			let tmp=functions.check_out(ttt);
+			let tmp2=functions.in4out5(tmp);
+			bfull.set(tmp2,1);
+			//console.log(bfull);
+			obj.back=func;
+			obj.cmd=commands.controller_details.end;
+			obj.socket.write(bfull);
+			obj.req=req;
+			obj.res=res;
+		},
+		end(obj){
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			let asd=functions.in5out4(ans);
+			//console.log(asd);
+			let tmp1={};
+			//console.log(asd.length);
+			tmp1.type=asd[8];
+			//tmp1.param=asd[9];
+			tmp1.size=asd[9]&3;
+			tmp1.x2=asd[9]>>2&1;
+			tmp1.wiegand=asd[9]>>3&1;
+			tmp1.join=asd[9]>>4&1;
+			tmp1.p_rzvr=asd[9]>>5&1;
+			tmp1.fv=asd[10]+"."+asd[11];
+			tmp1.as=asd[13]+"."+asd[14];
+			tmp1.rzvr=asd[12];
+			tmp1.ar=asd[15]+"."+asd[16];
+			obj.ansver=tmp1;
+			obj.back(obj);
+		}
+	},
+	open_door:{
+		start(req, res, conv, lic_num, controller_addr, func){
+			let obj=converters[conv].obj;	
+			obj.converter.cmd_id++;
+			let bfull = new Uint8Array([0x1F, 0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x07, controller_addr, 0x01, 0x00, 0x00, 0x00, 0x0D] );
+			let ttt=bfull.subarray(1,9);
+			//console.log(ttt.length);
+			let tmp=functions.check_out(ttt);
+			let tmp2=functions.in4out5(tmp);
+			bfull.set(tmp2,1);
+			//console.log(bfull);
+			obj.back=func;
+			obj.cmd=commands.open_door.end;
+			obj.socket.write(bfull);
+			obj.req=req;
+			obj.res=res;
+		},
+		end(obj){
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			let tmp1={};
+			if(ans.length>5){
+				let asd=functions.in5out4(ans);
+				//console.log(asd);
+				//console.log(asd.length);
+				if(asd[8]==0x55){
+					tmp1.result=1;
+				}else{
+					tmp1.result=0;
+				}
+				tmp1.repit=asd[9];
+			}else{
+				tmp1=String(ans);
+				console.log(ans);
+			}
+			obj.ansver=tmp1;
+			obj.back(obj);
+		}
+	}
 }
 
 let api={
@@ -312,6 +427,30 @@ let api={
 	install_lic:{
 		start(req, res, data, obj){
 			commands.install_lic.start(req, res, data.conv,  data.lic_num, data.lic_text, api.install_lic.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},
+	controllers_list:{
+		start(req, res, data, obj){
+			commands.controllers_list.start(req, res, data.conv,  data.lic_num, api.controllers_list.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},
+	controller_details:{
+		start(req, res, data, obj){
+			commands.controller_details.start(req, res, data.conv,  data.lic_num, data.controller_addr, api.controller_details.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},
+	open_door:{
+		start(req, res, data, obj){
+			commands.open_door.start(req, res, data.conv,  data.lic_num, data.controller_addr, api.open_door.end);
 		},
 		end(obj){
 			functions.answer_send(obj.res, obj.ansver);

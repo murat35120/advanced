@@ -3,13 +3,19 @@ const fs = require('fs'); //работа с файлами
 const path = require('path'); //работа с путями
 const os = require('os');
 const net = require('net');
-const port = 25000;
+const dgram = require('dgram');
 let host = '10.4.9.117';
+const port = 25000;
+//let host_client = '10.4.9.117';
+const port_client=1000;
 const port_http=8080;
 const roles=["manager", "admin"];
+const port_udp = 9000;
+const broadcast_adr = "255.255.255.255";
 
 const ip_adresses = os.networkInterfaces();
-for(const i in ip_adresses){
+
+for(const i in ip_adresses){ // получаем свой IP адрес для TCP, UDP и HTTP серверов
 	for(const k in ip_adresses[i]){
 		if(ip_adresses[i][k].family == 'IPv4'){
 			if(ip_adresses[i][k].address!="127.0.0.1"){
@@ -19,11 +25,93 @@ for(const i in ip_adresses){
 		}
 	}
 }
+
+//TCP  клиент, конвертеры в режиме сервер----------->>>----------------
+function new_client(host_client){
+	let client = new net.Socket();
+	let obj={socket:client, cmd:commands.new_sock.short_info};
+	client.connect(port_client, host_client, function() {
+		//console.log('Connected TCP client' + client.address().address);
+		client.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
+		commands.new_sock.start(obj);
+	});
+	client.on('data', function(data) {
+		//console.log('from client ' + data);
+		commands.answer(data, obj);
+	});
+	client.on('close', function() {
+	console.log('Connection client closed');
+	});
+	client.on('error', function() {
+		console.log("error client ");
+	});
+}
+//----------------------------<<<------------------------------
+
+
+//UDP server  поиск конвертеров -------------->>-----------------------
+const server_udp = dgram.createSocket("udp4");
+server_udp.bind(function() {
+    server_udp.setBroadcast(true);
+    setTimeout(broadcastNew, 3000);
+});
+server_udp.on('message', function (message, rinfo) {
+	let msg={};
+	msg.from=rinfo.address;
+	let str=String(message);
+	arr=str.split(' ');
+	for(let i in arr){
+		let k=arr[i].split(':');
+		if(k.length>1){
+			msg[k[0]]=k[1];
+		}else{
+			let ind=k[0].indexOf('SN');
+			if(k[0].includes('SN')){
+				msg.number=k[0].slice(ind+2); 
+			}
+		}
+	}
+	if((msg.L1_Port==port_client)||(msg.L2_Port==port_client)){
+		if((msg.L1_Conn=='0.0.0.0')&&(msg.L2_Conn=='0.0.0.0')){
+			//console.log(msg);
+			new_client(msg.from);
+		}
+	}
+});
+function broadcastNew() {
+    var message = Buffer.from("SEEK Z397IP");
+    server_udp.send(message, 0, message.length, port_udp, broadcast_adr, function() {
+        //console.log("Sent '" + message + "'");
+    });
+}
+//-----------------------------------------------------------<<----------------------------
+
+//TCP servet,  конвертеры в режиме клиент -------------->>>-------
 const server = net.createServer();
 server.listen(port, host, () => {
 console.log('TCP Server running at ' + host + ' port '+ port);
 });
 
+server.on('connection', function(sock) {
+	let obj={socket:sock, cmd:commands.new_sock.short_info};
+	console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
+	//Для перевода конвертера в режим "ADVANCED" необходимо установить скорость линии 230400:
+	obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
+	obj.socket.on('data', function(data) {
+		commands.answer(data, obj);
+	});
+	obj.socket.on('error', function(data) {
+		console.log("error from ");
+	});
+	obj.socket.on('close', function(data) {
+		console.log('CLOSED: of ' );
+	});
+	commands.new_sock.start(obj);
+});
+//--------------<<<------------------------------------------------------
+
+
+//HTTP сервер,  получаем команды API ---------->>>--------------
 const server_http = http.createServer((req, res) => {
     let first_url=req.url;
 	if(req.method=='GET'){ // запросы страниц
@@ -65,30 +153,11 @@ function send_post(req, res){
         });
     });	
 }
+//--------------<<<------------------------------------
 
 let converters = {};
 
-server.on('connection', function(sock) {
-	//let id=num++;
-	let obj={socket:sock, cmd:commands.new_sock.short_info};
-	//sockets[id]=converter;
-	console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
-	//sockets[id].socket=sock;
-	//Для перевода конвертера в режим "ADVANCED" необходимо установить скорость линии 230400:
-	obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
-	obj.socket.on('data', function(data) {
-		commands.answer(data, obj);
-	});
-	obj.socket.on('error', function(data) {
-		console.log("error from ");
-	});
-	obj.socket.on('close', function(data) {
-		console.log('CLOSED: of ' );
-		//sockets[id].socket.remoteAddress;
-		//sockets[id].socket.remotePort;
-	});
-	commands.new_sock.start(obj);
-});
+
 
 let commands={
 	new_sock:{
@@ -184,23 +253,6 @@ let commands={
 	short_info(obj){
 		let cmd_buf=Buffer.from([0xC8, 0x0D]);//краткое описание
 		obj.socket.write(cmd_buf);
-	},
-	read_lic_1(obj){
-		let bstart=Buffer.from([0x01] );
-		console.log("bstart - " + bstart);
-		let bend=Buffer.from([0x0D] );		
-		let buffer = Buffer.from([0x00, 0x00, 0x08, 0x01, 0x01, 0x08, 0x00, 0x00] );//краткое описание
-		console.log("buffer - " + buffer);
-		let tmp=functions.check_out(buffer);
-		let tmp2=functions.in4out5(tmp);
-		let tmp3=Buffer.from(tmp2);
-		let tlength=bstart.length+tmp3.length+bend.length;
-		console.log("tmp2 - " + tmp2);
-		console.log("tmp2 - " + tmp3);
-		console.log("tlength - " + tlength);
-		let bfull=Buffer.concat([bstart, tmp3, bend], tlength);
-		console.log("bful - " + bfull);
-		obj.socket.write(bfull);
 	},
 	read_lic(obj){
 		let bstart = new Uint8Array([0x1E]);  //создаем first
@@ -456,6 +508,12 @@ let api={
 			functions.answer_send(obj.res, obj.ansver);
 		}
 	},
+	seek:{//broadcastNew
+		start(req, res, data, obj){
+			broadcastNew();
+			functions.answer_send(res, "seek send");
+		}
+	}
 }
 
 let functions={
@@ -542,4 +600,4 @@ let functions={
 }
 
 //let timerId_0 = setTimeout(adv, 8000);
-//let timerId = setTimeout(send, 4000);
+//let timerId = setInterval(broadcastNew, 4000);

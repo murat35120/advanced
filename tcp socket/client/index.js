@@ -1,10 +1,10 @@
 const net = require('net');
 const client = new net.Socket();
-const port = 25000;
-const host = '10.4.9.117';
+const port = 1000;
+const host = '192.168.1.3';
 client.connect(port, host, function() {
 console.log('Connected');
-client.write("Hello From Client " + client.address().address);
+client.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
 });
 client.on('data', function(data) {
 console.log('Server Says : ' + data);

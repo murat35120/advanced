@@ -4,17 +4,15 @@ const path = require('path'); //работа с путями
 const os = require('os');
 const net = require('net');
 const dgram = require('dgram');
-let host = '10.4.9.117';
 const port = 25000;
-//let host_client = '10.4.9.117';
 const port_client=1000;
 const port_http=8080;
 const roles=["manager", "admin"];
 const port_udp = 9000;
 const broadcast_adr = "255.255.255.255";
-
 const ip_adresses = os.networkInterfaces();
 
+let host = '10.4.9.117';
 for(const i in ip_adresses){ // получаем свой IP адрес для TCP, UDP и HTTP серверов
 	for(const k in ip_adresses[i]){
 		if(ip_adresses[i][k].family == 'IPv4'){
@@ -93,12 +91,18 @@ console.log('TCP Server running at ' + host + ' port '+ port);
 });
 
 server.on('connection', function(sock) {
-	let obj={socket:sock, cmd:commands.new_sock.short_info};
+	let obj={socket:sock, data:""};
+	obj.queue=new Set(); //очередь
+	obj.stack=[]; //стэк
+	obj.cmd_id=0;
+	obj.stack.push(obj.queue[Symbol.iterator]()); //добавили очередь в стэк, она всегда самая первая команда;
 	console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
 	//Для перевода конвертера в режим "ADVANCED" необходимо установить скорость линии 230400:
 	obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
 	obj.socket.on('data', function(data) {
-		commands.answer(data, obj);
+		obj.data=data;
+		commands.answer(obj);
+		
 	});
 	obj.socket.on('error', function(data) {
 		console.log("error from ");
@@ -106,7 +110,15 @@ server.on('connection', function(sock) {
 	obj.socket.on('close', function(data) {
 		console.log('CLOSED: of ' );
 	});
-	commands.new_sock.start(obj);
+	//obj.cmd=[];  //устарело, в место него stack
+	//let gen=in_api.new_sock(obj);
+	//obj.gen=gen;
+	//!!!!!!!!!!!!!!!!!!!!!!!- тут нужно= можно добавить не в стек а в очередь
+	obj.stack.push(in_api.new_sock(obj));
+	obj.stack[obj.stack.length-1].next();
+	//тут должен быть стек указателей на функции обработчики очередь/генераторы разной вложенности в поле cmd
+	
+	
 });
 //--------------<<<------------------------------------------------------
 
@@ -156,7 +168,122 @@ function send_post(req, res){
 //--------------<<<------------------------------------
 
 let converters = {};
+let controllers = {
+//	[model+number]{	model:"", number:"",type:"",fv:"",fv_ms:"", converter:[model+number], address:2 }
+};
 
+classes:{
+	class c397web{
+		type="";
+		socket={};
+		cmd={};
+		data={};
+		tmr={};
+		lic_mun=8;
+		cmd_id=0;
+		back={};
+		full_info="";
+		model="";
+		number="";
+		mode="";
+		key="";
+		kontrollers=[];
+	}
+	class z5rweb{
+		type="";
+		socket={};
+		cmd={};
+		data={};
+		tmr={};
+		lic_mun=8;
+		cmd_id=0;
+		back={};
+		full_info="";
+		model="";
+		number="";
+		mode="";
+		key="";
+		kontrollers=[];
+	}
+}
+
+
+
+let in_api={
+	*new_sock(obj) {
+		let timerId = setTimeout(()=>obj.stack[obj.stack.length-1].next(), 100);
+		yield "start";
+		obj.socket.write(func_api.full_info());
+		yield "read full_info"
+		obj.full_info=String(obj.data);
+		obj.socket.write(func_api.short_info());
+		yield "read short_info"
+		if(obj.data.length){
+			let arr = String(obj.data).split(' ');
+			obj.model=arr[0];
+			if(arr[1].length){
+				let arr1=arr[1].split(',');
+				if(arr1[0]){
+					obj.number=arr1[0].split(':')[1];
+				}
+				if(arr1[1]){
+					obj.mode=arr1[1].split(':')[1];
+				}
+				if(arr1[2]){
+					obj.key=arr1[2].split('\r')[0];
+				}
+			}
+		}
+		obj.socket.write(func_api.license_list());
+		yield "read license_list"
+		let arr = String(obj.data).split('LIC: ');
+		let lic={};
+		if(arr.length){
+			for (i=0; i<arr.length; i++){
+				if(arr[i].length){
+					let ss=arr[i].split(' ');
+					if(Number(ss[0])){
+						lic.type=Number(ss[0]);
+						lic.controllers=ss[1].split('/')[0].split('(')[1];
+						lic.cards=ss[1].split('/')[1].split(')')[0];
+					}
+				}
+			}
+		}
+		obj.lic=lic;
+		obj.stack.pop();
+		console.log("end");
+		yield "next_3"
+	}
+	
+	//let generator = gen();
+	//alert( generator.next().value ); // "2 + 2 = ?"
+	
+};
+let out_api={};
+let func_api={
+	full_info(){
+		return Buffer.from([0x69, 0x0D]);//полное описание
+	},	
+	short_info(){
+		return Buffer.from([0xC8, 0x0D]);//краткое описание
+	},
+	license_list(){
+		return Buffer.from([0x4C, 0x0D]);//список лицензий
+	},
+	end(){
+		console.log("end");
+	},
+	read_lic(obj){
+			obj.cmd_id++;
+			let buffer = new Uint8Array([0x1E, 0x00, 0x00, obj.lic_num, obj.cmd_id, 0x01, 0x08, 0x00, 0x00, 0x0D] );
+			let temp0=buffer.subarray(1,buffer.length-1);
+			let tmp=functions.check_out(temp0);
+			let tmp2=functions.in4out5(tmp);
+			buffer.set(tmp2,1);
+		return buffer;//список лицензий
+	}
+};
 
 
 let commands={
@@ -237,10 +364,10 @@ let commands={
 			//console.log(converters.size);
 		},
 	},
-	answer(data, obj){
-		//console.log(String(data));
-		obj.data=data;
-		obj.cmd(obj); //заранее записана функция обработчик ответа
+	answer(obj){
+		//console.log(String(obj.data));
+		//obj.data=data;
+		obj.stack[obj.stack.length-1].next(); //заранее записана функция обработчик ответа
 	},
 	license_list(obj){
 		let cmd_buf=Buffer.from([0x4C, 0x0D]);//список лицензий
@@ -283,7 +410,7 @@ let commands={
 			bfull.set(tmp2,1);
 			//console.log("bful - " + bfull);
 			obj.back=func;
-			obj.cmd=commands.read_lic_api.end;
+			obj.stack[obj.stack.length-1]=commands.read_lic_api.end;
 			obj.socket.write(bfull);
 			obj.req=req;
 			obj.res=res;

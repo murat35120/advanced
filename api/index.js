@@ -113,9 +113,21 @@ server.on('connection', function(sock) {
 	//obj.cmd=[];  //устарело, в место него stack
 	//let gen=in_api.new_sock(obj);
 	//obj.gen=gen;
+	//добавляем в очередь, выполняем шаг очереди
+	//нужна функция которая обрабатывает очередь проверяет, стартует, выполняет, завершает
+	//итератор очереди пишем в стек
 	//!!!!!!!!!!!!!!!!!!!!!!!- тут нужно= можно добавить не в стек а в очередь
-	obj.stack.push(in_api.new_sock(obj));
-	obj.stack[obj.stack.length-1].next();
+	//по шагам
+	// очередь объектов
+	// каждый объект  это параметры и функция func
+	// в стек пишем queue
+	// далее,  для каждого шага функция из  func  с параметрами	
+	let step={params:{}, func:in_api.new_sock};
+	obj.queue.add(step);
+	obj.iterator = obj.queue[Symbol.iterator]();
+	in_api.queue(obj);
+	//obj.stack.push(in_api.new_sock(obj));
+	//obj.stack[obj.stack.length-1].next();
 	//тут должен быть стек указателей на функции обработчики очередь/генераторы разной вложенности в поле cmd
 	
 	
@@ -210,6 +222,15 @@ classes:{
 
 
 let in_api={
+	queue(obj){
+		if(obj.queue.size){
+			let result = obj.iterator.next().value; //{done: Boolean, value: any}
+			obj.params=result.params;
+			//console.log(result);
+			obj.stack.push(result.func(obj));
+			obj.stack[obj.stack.length-1].next();
+		}
+	},
 	*new_sock(obj) {
 		let timerId = setTimeout(()=>obj.stack[obj.stack.length-1].next(), 100);
 		yield "start";
@@ -252,12 +273,17 @@ let in_api={
 		}
 		obj.lic=lic;
 		obj.stack.pop();
-		console.log("end");
+		let name=obj.model+"_"+obj.number;
+		if( name in converters){
+			converters[name].socket=obj;
+		}else{
+			converters[name]= {}; //используем класс
+			converters[name].socket=obj; 
+		}	
+		//тут должен быть повторный вызов стека
+		console.log("end "+name);		
 		yield "next_3"
 	}
-	
-	//let generator = gen();
-	//alert( generator.next().value ); // "2 + 2 = ?"
 	
 };
 let out_api={};

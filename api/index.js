@@ -24,7 +24,7 @@ for(const i in ip_adresses){ // получаем свой IP адрес для T
 	}
 }
 
-//TCP  клиент, конвертеры в режиме сервер----------->>>----------------
+//TCP  client, конвертеры в режиме сервер----------->>>----------------
 function new_client(host_client){
 	let client = new net.Socket();
 	let obj={socket:client, cmd:commands.new_sock.short_info};
@@ -84,7 +84,7 @@ function broadcastNew() {
 }
 //-----------------------------------------------------------<<----------------------------
 
-//TCP servet,  конвертеры в режиме клиент -------------->>>-------
+//TCP server,  конвертеры в режиме клиент -------------->>>-------
 const server = net.createServer();
 server.listen(port, host, () => {
 console.log('TCP Server running at ' + host + ' port '+ port);
@@ -97,12 +97,10 @@ server.on('connection', function(sock) {
 	obj.cmd_id=0;
 	obj.stack.push(obj.queue[Symbol.iterator]()); //добавили очередь в стэк, она всегда самая первая команда;
 	console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
-	//Для перевода конвертера в режим "ADVANCED" необходимо установить скорость линии 230400:
-	obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
+	obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));//Для перевода конвертера в режим "ADVANCED" необходимо установить скорость линии 230400:
 	obj.socket.on('data', function(data) {
 		obj.data=data;
-		commands.answer(obj);
-		
+		commands.answer(obj);	
 	});
 	obj.socket.on('error', function(data) {
 		console.log("error from ");
@@ -110,26 +108,10 @@ server.on('connection', function(sock) {
 	obj.socket.on('close', function(data) {
 		console.log('CLOSED: of ' );
 	});
-	//obj.cmd=[];  //устарело, в место него stack
-	//let gen=in_api.new_sock(obj);
-	//obj.gen=gen;
-	//добавляем в очередь, выполняем шаг очереди
-	//нужна функция которая обрабатывает очередь проверяет, стартует, выполняет, завершает
-	//итератор очереди пишем в стек
-	//!!!!!!!!!!!!!!!!!!!!!!!- тут нужно= можно добавить не в стек а в очередь
-	//по шагам
-	// очередь объектов
-	// каждый объект  это параметры и функция func
-	// в стек пишем queue
-	// далее,  для каждого шага функция из  func  с параметрами	
-	let step={params:{}, func:in_api.new_sock};
-	obj.queue.add(step);
-	obj.iterator = obj.queue[Symbol.iterator]();
-	in_api.queue(obj);
-	//obj.stack.push(in_api.new_sock(obj));
-	//obj.stack[obj.stack.length-1].next();
-	//тут должен быть стек указателей на функции обработчики очередь/генераторы разной вложенности в поле cmd
-	
+	let step={params:{}, func:in_api.new_sock}; //элемент очереди
+	obj.queue.add(step); //добавили команду в очередь
+	obj.iterator = obj.queue[Symbol.iterator](); //создали итератор для очереди
+	in_api.queue(obj);//шаг очереди= функция, делает шаг и вызываетя функцию
 	
 });
 //--------------<<<------------------------------------------------------
@@ -161,8 +143,8 @@ function send_post(req, res){
 			let data = JSON.parse(body);
 			obj.role=path.basename(req.url);
 			if(roles.includes(obj.role)){
-				if(data.command in api){
-					api[data.command].start(req, res, data, obj);
+				if(data.command in out_api){
+					out_api[data.command].start(req, res, data, obj);
 				}else{
 					functions.answer_send(res, "no the command");
 				}
@@ -184,8 +166,8 @@ let controllers = {
 //	[model+number]{	model:"", number:"",type:"",fv:"",fv_ms:"", converter:[model+number], address:2 }
 };
 
-classes:{
-	class c397web{
+let classes={
+	Z397web: class {
 		type="";
 		socket={};
 		cmd={};
@@ -200,8 +182,8 @@ classes:{
 		mode="";
 		key="";
 		kontrollers=[];
-	}
-	class z5rweb{
+	},
+	Z5rweb: class {
 		type="";
 		socket={};
 		cmd={};
@@ -224,22 +206,22 @@ classes:{
 let in_api={
 	queue(obj){
 		if(obj.queue.size){
-			let result = obj.iterator.next().value; //{done: Boolean, value: any}
+			let result = obj.iterator.next().value; //
 			obj.params=result.params;
 			//console.log(result);
-			obj.stack.push(result.func(obj));
-			obj.stack[obj.stack.length-1].next();
+			obj.stack.push(result.func(obj)); //добавляем функцию в стэк
+			obj.stack[obj.stack.length-1].next();//вызываем функцию
 		}
 	},
 	*new_sock(obj) {
-		let timerId = setTimeout(()=>obj.stack[obj.stack.length-1].next(), 100);
+		let timerId = setTimeout(()=>obj.stack[obj.stack.length-1].next(), 100);//если нет ответа, делаем следующий шаг
 		yield "start";
 		obj.socket.write(func_api.full_info());
 		yield "read full_info"
 		obj.full_info=String(obj.data);
 		obj.socket.write(func_api.short_info());
 		yield "read short_info"
-		if(obj.data.length){
+		if(obj.data.length){//парсим информацию о конвертере
 			let arr = String(obj.data).split(' ');
 			obj.model=arr[0];
 			if(arr[1].length){
@@ -254,6 +236,10 @@ let in_api={
 					obj.key=arr1[2].split('\r')[0];
 				}
 			}
+		} else{
+			obj.stack.pop(); //удаляем запись из стэка
+			//тут должен быть повторный вызов стека
+			return;
 		}
 		obj.socket.write(func_api.license_list());
 		yield "read license_list"
@@ -272,21 +258,66 @@ let in_api={
 			}
 		}
 		obj.lic=lic;
-		obj.stack.pop();
+		obj.stack.pop(); //удаляем запись из стэка
 		let name=obj.model+"_"+obj.number;
 		if( name in converters){
 			converters[name].socket=obj;
 		}else{
-			converters[name]= {}; //используем класс
+			if(name.includes("397")){
+				converters[name]= new classes.Z397web() ; //используем класс
+			}else{
+				converters[name]= new classes.Z5rweb() ; //используем класс
+			}
+			//это должно быть в конструкторе
 			converters[name].socket=obj; 
 		}	
-		//тут должен быть повторный вызов стека
-		console.log("end "+name);		
+		console.log("end "+name);
+		let step={params:{}, func:in_api.read_lic}; //элемент очереди
+		obj.queue.add(step); //добавили команду в очередь
+		in_api.queue(obj);
 		yield "next_3"
-	}
+	},
+	*read_lic(obj){
+		let bstart = new Uint8Array([0x1E]);  //создаем first
+		let bend = new Uint8Array([0x0D]);  //создаем last	
+		obj.cmd_id++;
+		let buffer = new Uint8Array([0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x01, 0x08, 0x00, 0x00] );//краткое описание
+		let tmp=functions.check_out(buffer);
+		let tmp2=functions.in4out5(tmp);
+		let tlength=bstart.length+tmp2.length+bend.length;
+		let bfull = new Uint8Array(tlength);
+		bfull.set(bstart);
+		bfull.set(tmp2,1);
+		bfull.set(bend,11);
+		obj.socket.write(bfull);
+		yield "read_lic"
+		obj.stack.pop(); //удаляем запись из стэка
+		console.log("start");
+	},
 	
 };
-let out_api={};
+let out_api={
+	get_converters:{
+		start(req, res, data, obj){
+			//console.log(data.password);
+			let asd=[];
+			for(let key in converters){
+				//console.log(converters[key]);
+				asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].socket.socket.remoteAddress}  );
+			}
+			functions.answer_send(res, asd);
+		}
+	},
+	//команды работы с конвертером  запускаем через конвеер
+	read_lic:{
+		start(req, res, data, obj){
+			commands.read_lic_api.start(req, res, data.conv,  data.lic_num, api.read_lic.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},	
+};
 let func_api={
 	full_info(){
 		return Buffer.from([0x69, 0x0D]);//полное описание
@@ -391,8 +422,6 @@ let commands={
 		},
 	},
 	answer(obj){
-		//console.log(String(obj.data));
-		//obj.data=data;
 		obj.stack[obj.stack.length-1].next(); //заранее записана функция обработчик ответа
 	},
 	license_list(obj){
@@ -424,7 +453,7 @@ let commands={
 	},
 	read_lic_api:{
 		start(req, res, conv, lic_num, func){
-			let obj=converters[conv].obj;
+			let obj=converters[conv].socket;
 			obj.converter.lic_num=lic_num;
 			obj.converter.cmd_id++;
 			let buffer = new Uint8Array([0x1E, 0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x01, 0x08, 0x00, 0x00, 0x0D] );
@@ -616,7 +645,8 @@ let api={
 			//console.log(data.password);
 			let asd=[];
 			for(let key in converters){
-			asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].obj.socket.remoteAddress}  );
+				//console.log(converters[key]);
+				asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].socket.socket.remoteAddress}  );
 			}
 			functions.answer_send(res, asd);
 		}

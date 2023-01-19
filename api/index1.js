@@ -95,11 +95,12 @@ server.on('connection', function(sock) {
 	obj.queue=new Set(); //очередь
 	obj.stack=[]; //стэк
 	obj.cmd_id=0;
+	//obj.stack.push(obj.queue[Symbol.iterator]()); //добавили очередь в стэк, она всегда самая первая команда;
 	console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
 	obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));//Для перевода конвертера в режим "ADVANCED" необходимо установить скорость линии 230400:
 	obj.socket.on('data', function(data) {
 		obj.data=data;
-		func_api.answer(obj);	
+		commands.answer(obj);	
 	});
 	obj.socket.on('error', function(data) {
 		console.log("error from ");
@@ -107,6 +108,11 @@ server.on('connection', function(sock) {
 	obj.socket.on('close', function(data) {
 		console.log('CLOSED: of ' );
 	});
+	//let step={params:{}, func:in_api.new_sock}; //элемент очереди
+	//obj.queue.add(step); //добавили команду в очередь
+	//obj.iterator = obj.queue[Symbol.iterator](); //создали итератор для очереди
+	//in_api.queue(obj);//шаг очереди= функция, делает шаг и вызываетя функцию
+	//console.log('start' );
 	in_api.queue_add(obj, {}, in_api.new_sock);
 	in_api.queue_add(obj, {}, in_api.read_lic);
 	
@@ -141,14 +147,6 @@ function send_post(req, res){
 			obj.role=path.basename(req.url);
 			if(roles.includes(obj.role)){
 				if(data.command in out_api){
-					//if(data.user_key in users){
-					//	users[data.user_key].res=res;
-					//}else{
-					//	user_key++;
-					//	users[user_key]={};
-					//	users[user_key].res=res;
-					//	data.user_key=user_key;
-					//}
 					out_api[data.command].start(req, res, data, obj);
 				}else{
 					functions.answer_send(res, "no the command");
@@ -167,49 +165,47 @@ function send_post(req, res){
 //--------------<<<------------------------------------
 
 let converters = {};
-//let users = {};
-//let user_key=0;
 let controllers = {
 //	[model+number]{	model:"", number:"",type:"",fv:"",fv_ms:"", converter:[model+number], address:2 }
 };
 
 let in_api={
-	queue(obj){//шаг очереди = выполнение
+	queue(obj){
+		//console.log('queue_do_in - '+obj.queue.size );
+		//console.log('stack_do_in - '+obj.stack.length );
 		if(obj.queue.size){
 			let result = obj.iterator.next(); //
-			//console.log('result - '+result.done );
-			if(result.done){//очередь завершена
+			console.log('result - '+result.done );
+			if(result.done){
 				obj.queue.clear();
-				obj.stack.pop(); //удаляем запись из стэка (удаляем указатель на очередь)
+				obj.stack.pop(); //удаляем запись из стэка
 			} else{
-				obj.back=result.value.back;
 				obj.params=result.value.params;
 				obj.stack.push(result.value.func(obj)); //добавляем функцию в стэк
 				obj.stack[obj.stack.length-1].next();//вызываем функцию
-				clearTimeout(obj.tmr);//сбросили старый таймер
-				obj.tmr= setTimeout(in_api.out, 500, obj);//новый таймер, если ответа не будет
 			}
+			
 		}
+			//obj.stack.pop(); //удаляем запись из стэка
+		//console.log('queue_do_out - '+obj.queue.size );
+		//console.log('stack_do_out - '+obj.stack.length );
 	},
-	queue_add(obj, params, func, back=''){
+	queue_add(obj, params, func){
 		//console.log('next' );
-		let step={params:params, func:func, back:back}; //элемент очереди
+		let step={params:params, func:func}; //элемент очереди
+		//console.log('queue_add_in - '+obj.queue.size );
+		//console.log('stack_add_in - '+obj.stack.length );
 		obj.queue.add(step); //добавили команду в очередь
+		
 		if(!obj.stack.length){
 			console.log('add_cmd ' );
 			obj.iterator = obj.queue[Symbol.iterator](); //создали итератор для очереди
 			obj.stack.push(obj.iterator); //добавили очередь в стэк, она всегда самая первая команда;
 			in_api.queue(obj);
 		}
+		//console.log('queue_add_out - '+obj.queue.size );
+		//console.log('stack_add_out - '+obj.stack.length );
 	},
-	out(obj){
-		obj.stack.pop(); //удаляем запись из стэка (удаляем указатель на предыдущий шаг)
-		if(obj.back){
-			obj.back.func(obj);
-		}
-		in_api.queue(obj);
-	},
-
 	*new_sock(obj) {
 		let timerId = setTimeout(()=>obj.stack[obj.stack.length-1].next(), 100);
 		//console.log("start 1 ");
@@ -275,16 +271,16 @@ let in_api={
 		console.log("end "+name);
 		//let step={params:{}, func:in_api.read_lic}; //элемент очереди
 		//obj.queue.add(step); //добавили команду в очередь
-		in_api.out(obj);
-		yield "end"
+		in_api.queue(obj);
+		yield "next_3"
 	},
 	*read_lic(obj){
 		let bstart = new Uint8Array([0x1E]);  //создаем first
 		let bend = new Uint8Array([0x0D]);  //создаем last	
 		obj.cmd_id++;
 		let buffer = new Uint8Array([0x00, 0x00, obj.lic_num, obj.cmd_id, 0x01, 0x08, 0x00, 0x00] );//краткое описание
-		let tmp=func_api.check_out(buffer);
-		let tmp2=func_api.in4out5(tmp);
+		let tmp=functions.check_out(buffer);
+		let tmp2=functions.in4out5(tmp);
 		let tlength=bstart.length+tmp2.length+bend.length;
 		let bfull = new Uint8Array(tlength);
 		bfull.set(bstart);
@@ -292,14 +288,10 @@ let in_api={
 		bfull.set(bend,11);
 		obj.socket.write(bfull);
 		yield "read_lic"
-		let ans=obj.data.subarray(1,obj.data.length-1);
-		//console.log(ans);
-		let asd=func_api.in5out4(ans);
-		obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
 		obj.stack.pop(); //удаляем запись из стэка
 		let name=obj.model+"_"+obj.number;
 		console.log("start  "+name);
-		in_api.out(obj);
+		in_api.queue(obj);
 		yield "end"
 	},
 
@@ -319,12 +311,11 @@ let out_api={
 	//команды работы с конвертером  запускаем через конвеер
 	read_lic:{
 		start(req, res, data, obj){
-			back={res:res, func:out_api.read_lic.end};
-			in_api.queue_add(converters[data.conv], {}, in_api.read_lic,  back);
+			//commands.read_lic_api.start(req, res, data.conv,  data.lic_num, api.read_lic.end);
+			in_api.queue_add(converters[data.conv], {}, in_api.read_lic);
 		},
 		end(obj){
-			//тут нужно запольнить obj.ansver
-			func_api.answer_send(obj.back.res, obj.ansver);
+			functions.answer_send(obj.res, obj.ansver);
 		}
 	},	
 };
@@ -349,7 +340,367 @@ let func_api={
 			let tmp2=functions.in4out5(tmp);
 			buffer.set(tmp2,1);
 		return buffer;//список лицензий
+	}
+};
+
+
+let commands={
+	new_sock:{
+		start(obj){
+			obj.cmd=commands.new_sock.short_info;
+			let timerId = setTimeout(commands.new_sock.tmr, 100, obj);
+		},
+		tmr(obj){
+			obj.tmr= setTimeout(commands.new_sock.out, 1000, obj);
+			obj.cmd=commands.new_sock.full_info;
+			commands.full_info(obj);
+		},
+		full_info(obj){
+			clearTimeout(obj.tmr);
+			obj.tmr= setTimeout(commands.new_sock.out, 1000, obj);
+			function out(){commands.new_sock.out(obj);}
+			obj.converter={};
+			obj.converter.full_info=String(obj.data);
+			obj.cmd=commands.new_sock.short_info;
+			commands.short_info(obj);		
+		},
+		short_info(obj){
+			clearTimeout(obj.tmr);
+			obj.tmr= setTimeout(commands.new_sock.out, 1000, obj);
+			function out(){commands.new_sock.out(obj);}
+			if(obj.data.length){
+				let arr = String(obj.data).split(' ');
+				obj.converter.model=arr[0];
+				if(arr[1].length){
+					let arr1=arr[1].split(',');
+					if(arr1[0]){
+						obj.converter.number=arr1[0].split(':')[1];
+					}
+					if(arr1[1]){
+						obj.converter.mode=arr1[1].split(':')[1];
+					}
+					if(arr1[2]){
+						obj.converter.key=arr1[2].split('\r')[0];
+					}
+				}
+			}
+			obj.cmd=commands.new_sock.license_list;
+			commands.license_list(obj);		
+		},
+		license_list(obj){
+			let arr = String(obj.data).split('LIC: ');
+			let lic={};
+			if(arr.length){
+				for (i=0; i<arr.length; i++){
+					if(arr[i].length){
+						let ss=arr[i].split(' ');
+						if(Number(ss[0])){
+							lic.type=Number(ss[0]);
+							lic.controllers=ss[1].split('/')[0].split('(')[1];
+							lic.cards=ss[1].split('/')[1].split(')')[0];
+						}
+					}
+				}
+			}
+			obj.converter.lic=lic;
+			obj.converter.lic_num=new Uint8Array([0x08]);
+			obj.converter.obj=obj;
+			obj.converter.cmd_id=new Uint8Array([0x00]);
+			converters[obj.converter.model+"_"+obj.converter.number]= obj.converter;
+			obj.cmd=commands.new_sock.read_lic;
+			commands.read_lic(obj);
+		},
+		read_lic(obj){
+			//console.log(obj.data);
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			//console.log(ans);
+			let tmp2=functions.in5out4(ans);
+			//console.log(tmp2);
+		},
+		out(obj){
+			//console.log("out");
+			//console.log(converters.size);
+		},
 	},
+	answer(obj){
+		obj.stack[obj.stack.length-1].next(); //заранее записана функция обработчик ответа
+	},
+	license_list(obj){
+		let cmd_buf=Buffer.from([0x4C, 0x0D]);//список лицензий
+		obj.socket.write(cmd_buf);	
+	},
+	full_info(obj){
+		let cmd_buf=Buffer.from([0x69, 0x0D]);//полное описание
+		obj.socket.write(cmd_buf);
+	},
+	short_info(obj){
+		let cmd_buf=Buffer.from([0xC8, 0x0D]);//краткое описание
+		obj.socket.write(cmd_buf);
+	},
+	read_lic(obj){
+		let bstart = new Uint8Array([0x1E]);  //создаем first
+		let bend = new Uint8Array([0x0D]);  //создаем last	
+		obj.converter.cmd_id++;
+		let buffer = new Uint8Array([0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x01, 0x08, 0x00, 0x00] );//краткое описание
+		let tmp=functions.check_out(buffer);
+		let tmp2=functions.in4out5(tmp);
+		let tlength=bstart.length+tmp2.length+bend.length;
+		let bfull = new Uint8Array(tlength);
+		bfull.set(bstart);
+		bfull.set(tmp2,1);
+		bfull.set(bend,11);
+		//console.log("bful - " + bfull);
+		obj.socket.write(bfull);
+	},
+	read_lic_api:{
+		start(req, res, conv, lic_num, func){
+			let obj=converters[conv];
+			obj.lic_num=lic_num;
+			obj.cmd_id++;
+			let buffer = new Uint8Array([0x1E, 0x00, 0x00, obj.lic_num, obj.cmd_id, 0x01, 0x08, 0x00, 0x00, 0x0D] );
+			let tmp=functions.check_out(buffer.subarray(1,buffer.length-1));
+			//console.log(tmp);
+			let tmp2=functions.in4out5(tmp);
+			//console.log(tmp2);
+			let bfull = new Uint8Array([0x1E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0D] );
+			bfull.set(tmp2,1);
+			//console.log("bful - " + bfull);
+			obj.back=func;
+			obj.stack[obj.stack.length-1]=commands.read_lic_api.end;
+			obj.socket.write(bfull);
+			obj.req=req;
+			obj.res=res;
+		},
+		end(obj){
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			//console.log(ans);
+			let asd=functions.in5out4(ans);
+			obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
+			obj.back(obj);
+		}
+	},
+	install_lic:{
+		start(req, res, conv, lic_num, lic_text, func){
+			let bfull = new Uint8Array(47);
+			let obj=converters[conv].obj;
+			let lic_full;
+			if(!lic_text){
+				lic_full = new Uint8Array([0x85,0x83,0x68,0xE4,0x03,0xCB,0xCE,0x35,0xC9,0x8D,0xC0,0x2B,0x62,0x96,0xCF,0x26,0x46,0x90,0x86,0x38,0xF6,0xE,0xC4,0xC5,0x19,0xC7]);
+			} else{
+				let i=0;
+				let arr=[];
+				while(i<lic_text.length){
+					arr.push(Number("0x"+lic_text.slice(i,i+2)));
+					i=i+2;
+				}
+				lic_full = new Uint8Array(arr);
+			}	
+			obj.converter.cmd_id++;
+			let buffer = new Uint8Array([0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x02, obj.converter.lic_num, 0x00, 0x00] );
+			let blast = new Uint8Array([0x00, 0x00] );
+			bfull.set(buffer,1);
+			bfull.set(lic_full,9);
+			bfull.set(blast,35);
+			let ttt=bfull.subarray(1,37);
+			let tmp=functions.check_out(ttt);
+			let tmp2=functions.in4out5(tmp);
+			let bfull_1 = new Uint8Array([0x1E] );
+			bfull.set(bfull_1,0);
+			let bend = new Uint8Array([0x0D] );
+			bfull.set(tmp2,1);
+			bfull.set(bend,46);
+			obj.back=func;
+			obj.cmd=commands.install_lic.end;
+			obj.socket.write(bfull);
+			obj.req=req;
+			obj.res=res;
+		},
+		end(obj){
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			let asd=functions.in5out4(ans);
+			obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
+			obj.back(obj);
+		}
+	},
+	controllers_list:{
+		start(req, res, conv, lic_num, func){
+			let obj=converters[conv].obj;	
+			obj.converter.cmd_id++;
+			let bfull = new Uint8Array([0x20, 0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x0D] );
+			let ttt=bfull.subarray(1,9);
+			//console.log(ttt.length);
+			let tmp=functions.check_out(ttt);
+			let tmp2=functions.in4out5(tmp);
+			bfull.set(tmp2,1);
+			//console.log(bfull);
+			obj.back=func;
+			obj.cmd=commands.controllers_list.end;
+			obj.socket.write(bfull);
+			obj.req=req;
+			obj.res=res;
+		},
+		end(obj){
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			let asd=functions.in5out4(ans);
+			let tmp=asd.subarray(8,22);
+			let tmp1=[];
+			//console.log(tmp);
+			for(let i=0; i<tmp.length; i++){
+				let sh= new Uint8Array([0x1]);
+				let k;
+				if(tmp[i]){
+					for(let j=0; j<8; j++){
+						k=tmp[i]&sh;
+						if(k){
+							tmp1.push(i*8+k+1);
+						}
+						sh=sh<<1;
+					}
+				}
+			}
+			obj.ansver=tmp1;
+			obj.back(obj);
+		}
+	},
+	controller_details:{
+		start(req, res, conv, lic_num, controller_addr, func){
+			let obj=converters[conv].obj;	
+			obj.converter.cmd_id++;
+			let bfull = new Uint8Array([0x20, 0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x00, controller_addr, 0x00, 0x00, 0x00, 0x00, 0x0D] );
+			let ttt=bfull.subarray(1,9);
+			//console.log(ttt.length);
+			let tmp=functions.check_out(ttt);
+			let tmp2=functions.in4out5(tmp);
+			bfull.set(tmp2,1);
+			//console.log(bfull);
+			obj.back=func;
+			obj.cmd=commands.controller_details.end;
+			obj.socket.write(bfull);
+			obj.req=req;
+			obj.res=res;
+		},
+		end(obj){
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			let asd=functions.in5out4(ans);
+			//console.log(asd);
+			let tmp1={};
+			//console.log(asd.length);
+			tmp1.type=asd[8];
+			//tmp1.param=asd[9];
+			tmp1.size=asd[9]&3;
+			tmp1.x2=asd[9]>>2&1;
+			tmp1.wiegand=asd[9]>>3&1;
+			tmp1.join=asd[9]>>4&1;
+			tmp1.p_rzvr=asd[9]>>5&1;
+			tmp1.fv=asd[10]+"."+asd[11];
+			tmp1.as=asd[13]+"."+asd[14];
+			tmp1.rzvr=asd[12];
+			tmp1.ar=asd[15]+"."+asd[16];
+			obj.ansver=tmp1;
+			obj.back(obj);
+		}
+	},
+	open_door:{
+		start(req, res, conv, lic_num, controller_addr, func){
+			let obj=converters[conv].obj;	
+			obj.converter.cmd_id++;
+			let bfull = new Uint8Array([0x1F, 0x00, 0x00, obj.converter.lic_num, obj.converter.cmd_id, 0x07, controller_addr, 0x01, 0x00, 0x00, 0x00, 0x0D] );
+			let ttt=bfull.subarray(1,9);
+			//console.log(ttt.length);
+			let tmp=functions.check_out(ttt);
+			let tmp2=functions.in4out5(tmp);
+			bfull.set(tmp2,1);
+			//console.log(bfull);
+			obj.back=func;
+			obj.cmd=commands.open_door.end;
+			obj.socket.write(bfull);
+			obj.req=req;
+			obj.res=res;
+		},
+		end(obj){
+			let ans=obj.data.subarray(1,obj.data.length-1);
+			let tmp1={};
+			if(ans.length>5){
+				let asd=functions.in5out4(ans);
+				//console.log(asd);
+				//console.log(asd.length);
+				if(asd[8]==0x55){
+					tmp1.result=1;
+				}else{
+					tmp1.result=0;
+				}
+				tmp1.repit=asd[9];
+			}else{
+				tmp1=String(ans);
+				console.log(ans);
+			}
+			obj.ansver=tmp1;
+			obj.back(obj);
+		}
+	}
+}
+
+let api={
+	get_converters:{
+		start(req, res, data, obj){
+			//console.log(data.password);
+			let asd=[];
+			for(let key in converters){
+				//console.log(converters[key]);
+				asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].socket.socket.remoteAddress}  );
+			}
+			functions.answer_send(res, asd);
+		}
+	},
+	read_lic:{
+		start(req, res, data, obj){
+			commands.read_lic_api.start(req, res, data.conv,  data.lic_num, api.read_lic.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},	
+	install_lic:{
+		start(req, res, data, obj){
+			commands.install_lic.start(req, res, data.conv,  data.lic_num, data.lic_text, api.install_lic.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},
+	controllers_list:{
+		start(req, res, data, obj){
+			commands.controllers_list.start(req, res, data.conv,  data.lic_num, api.controllers_list.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},
+	controller_details:{
+		start(req, res, data, obj){
+			commands.controller_details.start(req, res, data.conv,  data.lic_num, data.controller_addr, api.controller_details.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},
+	open_door:{
+		start(req, res, data, obj){
+			commands.open_door.start(req, res, data.conv,  data.lic_num, data.controller_addr, api.open_door.end);
+		},
+		end(obj){
+			functions.answer_send(obj.res, obj.ansver);
+		}
+	},
+	seek:{//broadcastNew
+		start(req, res, data, obj){
+			broadcastNew();
+			functions.answer_send(res, "seek send");
+		}
+	}
+}
+
+let functions={
 	answer_send(res, msg){ // отправка сообщения API = HTTP сервер
 		res.writeHead(200);
 		if(typeof(msg)=="object"){
@@ -429,11 +780,6 @@ let func_api={
 		let c_summ_b = c_summ&0x0F;
 		buffer[0]=0xFF-c_summ_b;
 		return buffer;
-	},
-	answer(obj){
-		obj.stack[obj.stack.length-1].next(); //заранее записана функция обработчик ответа
-	},
-};
-
-
+	}
+}
 

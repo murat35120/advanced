@@ -141,15 +141,11 @@ function send_post(req, res){
 			obj.role=path.basename(req.url);
 			if(roles.includes(obj.role)){
 				if(data.command in out_api){
-					//if(data.user_key in users){
-					//	users[data.user_key].res=res;
-					//}else{
-					//	user_key++;
-					//	users[user_key]={};
-					//	users[user_key].res=res;
-					//	data.user_key=user_key;
-					//}
-					out_api[data.command].start(req, res, data, obj);
+					//let cmd_api=out_api[data.command](req, res, data, obj);
+					//obj.cmd_api=cmd_api;
+					//cmd_api.next();
+					//let params={reg:req, res:res, data:data, obj:obj};
+					in_api.queue_add(converters[data.conv], {reg:req, res:res, data:data, obj:obj}, out_api[data.command]);
 				}else{
 					functions.answer_send(res, "no the command");
 				}
@@ -182,32 +178,35 @@ let in_api={
 				obj.queue.clear();
 				obj.stack.pop(); //удаляем запись из стэка (удаляем указатель на очередь)
 			} else{
-				obj.back=result.value.back;
+				obj.func=result.value.func;
 				obj.params=result.value.params;
-				obj.stack.push(result.value.func(obj)); //добавляем функцию в стэк
+				obj.stack.push(result.value.func(obj)); //добавляем функцию в стэк = создаем генератор
 				obj.stack[obj.stack.length-1].next();//вызываем функцию
 				clearTimeout(obj.tmr);//сбросили старый таймер
 				obj.tmr= setTimeout(in_api.out, 500, obj);//новый таймер, если ответа не будет
 			}
 		}
 	},
-	queue_add(obj, params, func, back=''){
+	queue_add(obj, params, func){
 		//console.log('next' );
-		let step={params:params, func:func, back:back}; //элемент очереди
+		let step={params:params, func:func}; //элемент очереди
 		obj.queue.add(step); //добавили команду в очередь
 		if(!obj.stack.length){
-			console.log('add_cmd ' );
+			//console.log('add_cmd ' );
 			obj.iterator = obj.queue[Symbol.iterator](); //создали итератор для очереди
 			obj.stack.push(obj.iterator); //добавили очередь в стэк, она всегда самая первая команда;
 			in_api.queue(obj);
 		}
 	},
 	out(obj){
+		//console.log(obj.stack.length);
 		obj.stack.pop(); //удаляем запись из стэка (удаляем указатель на предыдущий шаг)
-		if(obj.back){
-			obj.back.func(obj);
+		if(obj.stack.length>1){
+			//console.log("run out");
+			obj.stack[obj.stack.length-1].next();//вызываем функцию
+		}else{
+			in_api.queue(obj);
 		}
-		in_api.queue(obj);
 	},
 
 	*new_sock(obj) {
@@ -260,7 +259,7 @@ let in_api={
 		}
 		obj.lic=lic;
 		obj.lic_num=new Uint8Array([0x08]);
-		obj.stack.pop(); //удаляем запись из стэка
+		//obj.stack.pop(); //удаляем запись из стэка
 		let name=obj.model+"_"+obj.number;
 		if( name in converters){
 			converters[name]=obj;
@@ -272,9 +271,7 @@ let in_api={
 			}
 			converters[name]=obj; 
 		}	
-		console.log("end "+name);
-		//let step={params:{}, func:in_api.read_lic}; //элемент очереди
-		//obj.queue.add(step); //добавили команду в очередь
+		console.log("new "+name);
 		in_api.out(obj);
 		yield "end"
 	},
@@ -296,37 +293,40 @@ let in_api={
 		//console.log(ans);
 		let asd=func_api.in5out4(ans);
 		obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
-		obj.stack.pop(); //удаляем запись из стэка
+		//obj.stack.pop(); //удаляем запись из стэка
 		let name=obj.model+"_"+obj.number;
-		console.log("start  "+name);
+		//console.log("start  "+name);
 		in_api.out(obj);
 		yield "end"
 	},
-
+	add_stack(ob, funk){
+		obj.stack.push(funk(obj)); //добавляем функцию в стэк
+		obj.stack[obj.stack.length-1].next();//вызываем функцию
+	}
 };
 let out_api={
-	get_converters:{
-		start(req, res, data, obj){
-			//console.log(data.password);
-			let asd=[];
-			for(let key in converters){
-				//console.log(converters[key]);
-				asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].socket.remoteAddress}  );
-			}
-			functions.answer_send(res, asd);
+	*get_converters(req, res, data, obj){
+		//console.log(data.password);
+		let asd=[];
+		for(let key in converters){
+			//console.log(converters[key]);
+			asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].socket.remoteAddress}  );
 		}
+		functions.answer_send(res, asd);
+		yield "end"
 	},
 	//команды работы с конвертером  запускаем через конвеер
-	read_lic:{
-		start(req, res, data, obj){
-			back={res:res, func:out_api.read_lic.end};
-			in_api.queue_add(converters[data.conv], {}, in_api.read_lic,  back);
-		},
-		end(obj){
-			//тут нужно запольнить obj.ansver
-			func_api.answer_send(obj.back.res, obj.ansver);
-		}
+	*read_lic(param){
+		obj=converters[param.params.data.conv];
+		in_api.add_stack(obj, in_api.read_lic);
+		//obj.stack.push(in_api.read_lic(obj)); //добавляем функцию в стэк
+		//obj.stack[obj.stack.length-1].next();//вызываем функцию
+		yield "read_lic"
+		//тут нужно запольнить obj.ansver
+		func_api.answer_send(obj.params.res, obj.ansver);
+		yield "end"
 	},	
+	
 };
 let func_api={
 	full_info(){

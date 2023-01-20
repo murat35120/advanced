@@ -15,14 +15,16 @@ result = obj.iterator.next(); //
 console.log('done - '+result.done );
 //ok
 let k={aa:0};
-function *gen(k){
-	k.aa++;
+let m=10;
+let s=3;
+function *gen(k, m, s){
+	k.aa=k.aa+m;
 	yield "gen1"
-	k.aa++;
+	k.aa=k.aa+s;
 	yield "gen2"
 	k.aa++;
 }
-let asd=gen(k);
+let asd=gen(k, m, s);
 console.log('k - '+k.aa );
 let qwe=asd.next();
 console.log('value - '+qwe.value );

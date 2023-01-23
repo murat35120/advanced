@@ -141,11 +141,11 @@ function send_post(req, res){
 			obj.role=path.basename(req.url);
 			if(roles.includes(obj.role)){
 				if(data.command in out_api){
-					//let cmd_api=out_api[data.command](req, res, data, obj);
-					//obj.cmd_api=cmd_api;
-					//cmd_api.next();
-					//let params={reg:req, res:res, data:data, obj:obj};
-					in_api.queue_add(converters[data.conv], {reg:req, res:res, data:data, obj:obj}, out_api[data.command]);
+					if(data.conv){
+						in_api.queue_add(converters[data.conv], {reg:req, res:res, data:data, obj:obj}, out_api[data.command]);
+					}else{
+						out_api[data.command](req, res, data, obj);
+					}
 				}else{
 					functions.answer_send(res, "no the command");
 				}
@@ -163,10 +163,7 @@ function send_post(req, res){
 //--------------<<<------------------------------------
 
 let converters = {};
-//let users = {};
-//let user_key=0;
 let controllers = {
-//	[model+number]{	model:"", number:"",type:"",fv:"",fv_ms:"", converter:[model+number], address:2 }
 };
 
 let in_api={
@@ -208,7 +205,10 @@ let in_api={
 			in_api.queue(obj);
 		}
 	},
-
+	add_stack(ob, funk){
+		obj.stack.push(funk(obj)); //добавляем функцию в стэк
+		obj.stack[obj.stack.length-1].next();//вызываем функцию
+	},
 	*new_sock(obj) {
 		let timerId = setTimeout(()=>obj.stack[obj.stack.length-1].next(), 100);
 		//console.log("start 1 ");
@@ -299,34 +299,71 @@ let in_api={
 		in_api.out(obj);
 		yield "end"
 	},
-	add_stack(ob, funk){
-		obj.stack.push(funk(obj)); //добавляем функцию в стэк
-		obj.stack[obj.stack.length-1].next();//вызываем функцию
+	*install_lic(obj){
+		let bfull = new Uint8Array(47);
+		let lic_full;
+		if(!obj.lic_text){
+			lic_full = new Uint8Array([0x85,0x83,0x68,0xE4,0x03,0xCB,0xCE,0x35,0xC9,0x8D,0xC0,0x2B,0x62,0x96,0xCF,0x26,0x46,0x90,0x86,0x38,0xF6,0xE,0xC4,0xC5,0x19,0xC7]);
+		} else{
+			let i=0;
+			let arr=[];
+			while(i<obj.lic_text.length){
+				arr.push(Number("0x"+obj.lic_text.slice(i,i+2)));
+				i=i+2;
+			}
+			lic_full = new Uint8Array(arr);
+		}	
+		obj.cmd_id++;
+		let buffer = new Uint8Array([0x00, 0x00, obj.lic_num, obj.cmd_id, 0x02, obj.lic_num, 0x00, 0x00] );
+		let blast = new Uint8Array([0x00, 0x00] );
+		bfull.set(buffer,1);
+		bfull.set(lic_full,9);
+		bfull.set(blast,35);
+		let ttt=bfull.subarray(1,37);
+		let tmp=func_api.check_out(ttt);
+		let tmp2=func_api.in4out5(tmp);
+		let bfull_1 = new Uint8Array([0x1E] );
+		bfull.set(bfull_1,0);
+		let bend = new Uint8Array([0x0D] );
+		bfull.set(tmp2,1);
+		bfull.set(bend,46);
+		obj.socket.write(bfull);
+		yield "install_lic"
+		let ans=obj.data.subarray(1,obj.data.length-1);
+		let asd=func_api.in5out4(ans);
+		obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
+		in_api.out(obj);
+		yield "end"
+	},
+	get_converters(){
+		let asd=[];
+		for(let key in converters){
+			asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].socket.remoteAddress});
+		}
+		return asd;
 	}
 };
 let out_api={
-	*get_converters(req, res, data, obj){
-		//console.log(data.password);
-		let asd=[];
-		for(let key in converters){
-			//console.log(converters[key]);
-			asd.push({key:key, mode:converters[key].mode, lic:converters[key].lic, addres:converters[key].socket.remoteAddress}  );
-		}
-		functions.answer_send(res, asd);
-		yield "end"
+	get_converters(req, res, data, obj){
+		func_api.answer_send(res, in_api.get_converters());
 	},
 	//команды работы с конвертером  запускаем через конвеер
 	*read_lic(param){
 		obj=converters[param.params.data.conv];
 		in_api.add_stack(obj, in_api.read_lic);
-		//obj.stack.push(in_api.read_lic(obj)); //добавляем функцию в стэк
-		//obj.stack[obj.stack.length-1].next();//вызываем функцию
 		yield "read_lic"
-		//тут нужно запольнить obj.ansver
 		func_api.answer_send(obj.params.res, obj.ansver);
 		yield "end"
 	},	
-	
+	*install_lic(param){
+		obj=converters[param.params.data.conv];
+		obj.lic_num=param.params.data.lic_num;
+		obj.lic_text=param.params.data.lic_text;
+		in_api.add_stack(obj, in_api.install_lic);
+		yield "install_lic"
+		func_api.answer_send(obj.params.res, obj.ansver);
+		yield "end"
+	},
 };
 let func_api={
 	full_info(){

@@ -30,6 +30,15 @@ let qwe=asd.next();
 console.log('value - '+qwe.value );
 console.log('done - '+qwe.done );
 console.log('k - '+k.aa );
+
+qwe=asd;
+console.log('value1 - '+qwe.value );
+console.log('done1 - '+qwe.done );
+console.log('k1 - '+k.aa );
+
+qwe=asd;
+console.log('k2 - '+k.aa );
+
 qwe=asd.next();
 console.log('value - '+qwe.value );
 console.log('done - '+qwe.done );

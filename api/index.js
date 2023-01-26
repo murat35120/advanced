@@ -27,18 +27,23 @@ for(const i in ip_adresses){ // получаем свой IP адрес для T
 //TCP  client, конвертеры в режиме сервер----------->>>----------------
 function new_client(host_client){
 	let client = new net.Socket();
-	let obj={socket:client, cmd:commands.new_sock.short_info};
+	let obj={socket:client, data:""};
 	client.connect(port_client, host_client, function() {
-		//console.log('Connected TCP client' + client.address().address);
-		client.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
-		commands.new_sock.start(obj);
+		obj.queue=new Set(); //очередь
+		obj.stack=[]; //стэк
+		obj.cmd_id=0;
+		console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
+		obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
+		in_api.queue_add(obj, {}, in_api.new_sock);
+		in_api.queue_add(obj, {}, in_api.read_lic);
 	});
 	client.on('data', function(data) {
-		//console.log('from client ' + data);
-		commands.answer(data, obj);
+		obj.data=data;
+		func_api.answer(obj);
 	});
 	client.on('close', function() {
-	console.log('Connection client closed');
+	console.log(obj.name+' client closed');
+	converters[obj.name].connected=false; 
 	});
 	client.on('error', function() {
 		console.log("error client ");
@@ -105,7 +110,8 @@ server.on('connection', function(sock) {
 		console.log("error from ");
 	});
 	obj.socket.on('close', function(data) {
-		console.log('CLOSED: of ' );
+		console.log(obj.name+' server closed');
+		converters[obj.name].connected=false; 
 	});
 	in_api.queue_add(obj, {}, in_api.new_sock);
 	in_api.queue_add(obj, {}, in_api.read_lic);
@@ -166,44 +172,50 @@ let converters = {};
 let controllers = {
 };
 
+let kk=0;
+
 let in_api={
 	queue(obj){//шаг очереди = выполнение
 		if(obj.queue.size){
 			let result = obj.iterator.next(); //
-			//console.log('result - '+result.done );
 			if(result.done){//очередь завершена
 				obj.queue.clear();
-				obj.stack.pop(); //удаляем запись из стэка (удаляем указатель на очередь)
+				obj.stack=[];
+				clearTimeout(obj.tmr);//сбросили старый таймер
 			} else{
 				obj.func=result.value.func;
 				obj.params=result.value.params;
 				obj.stack.push(result.value.func(obj)); //добавляем функцию в стэк = создаем генератор
 				obj.stack[obj.stack.length-1].next();//вызываем функцию
 				clearTimeout(obj.tmr);//сбросили старый таймер
-				obj.tmr= setTimeout(in_api.out, 500, obj);//новый таймер, если ответа не будет
+				obj.tmr= setTimeout(in_api.out_from_timer, 300, obj);//новый таймер, если ответа не будет
 			}
+		}else{
+			console.log("size2  "+obj.queue.size);
+			clearTimeout(obj.tmr);//сбросили старый таймер
 		}
 	},
 	queue_add(obj, params, func){
-		//console.log('next' );
 		let step={params:params, func:func}; //элемент очереди
 		obj.queue.add(step); //добавили команду в очередь
 		if(!obj.stack.length){
-			//console.log('add_cmd ' );
 			obj.iterator = obj.queue[Symbol.iterator](); //создали итератор для очереди
 			obj.stack.push(obj.iterator); //добавили очередь в стэк, она всегда самая первая команда;
 			in_api.queue(obj);
 		}
 	},
 	out(obj){
-		//console.log(obj.stack.length);
 		obj.stack.pop(); //удаляем запись из стэка (удаляем указатель на предыдущий шаг)
 		if(obj.stack.length>1){
-			//console.log("run out");
 			obj.stack[obj.stack.length-1].next();//вызываем функцию
 		}else{
 			in_api.queue(obj);
 		}
+	},
+	out_from_timer(obj){
+		//obj.stack.splice(1);
+		obj.err={reason:"timer"};
+		let ed=obj.stack[obj.stack.length-1].next();//вызываем функцию
 	},
 	add_stack(ob, funk){
 		obj.stack.push(funk(obj)); //добавляем функцию в стэк
@@ -261,6 +273,8 @@ let in_api={
 		obj.lic_num=new Uint8Array([0x08]);
 		//obj.stack.pop(); //удаляем запись из стэка
 		let name=obj.model+"_"+obj.number;
+		obj.name=name;
+		obj.connected=true;
 		if( name in converters){
 			converters[name]=obj;
 		}else{
@@ -292,11 +306,13 @@ let in_api={
 		let ans=obj.data.subarray(1,obj.data.length-1);
 		//console.log(ans);
 		let asd=func_api.in5out4(ans);
-		obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
-		//obj.stack.pop(); //удаляем запись из стэка
-		let name=obj.model+"_"+obj.number;
-		//console.log("start  "+name);
-		in_api.out(obj);
+		//if(func_api.check_in(asd) && asd[1]==obj.cmd_id){
+			obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
+			//obj.stack.pop(); //удаляем запись из стэка
+			let name=obj.model+"_"+obj.number;
+			//console.log("start  "+name);
+			in_api.out(obj);
+		//}
 		yield "end"
 	},
 	*install_lic(obj){
@@ -331,10 +347,93 @@ let in_api={
 		yield "install_lic"
 		let ans=obj.data.subarray(1,obj.data.length-1);
 		let asd=func_api.in5out4(ans);
+		asd=func_api.check_in(asd);
 		obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
 		in_api.out(obj);
 		yield "end"
 	},
+	*controllers_list(obj){//(req, res, conv, lic_num, func){	
+		obj.cmd_id++;
+		let bfull = new Uint8Array([0x20, 0x00, 0x00, obj.lic_num, obj.cmd_id, 0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x0D] );
+		let ttt=bfull.subarray(1,9);
+		let tmp=func_api.check_out(ttt);
+		let tmp2=func_api.in4out5(tmp);
+		bfull.set(tmp2,1);
+		obj.socket.write(bfull);
+		yield "controllers_list"
+		let ans=obj.data.subarray(1,obj.data.length-1);
+		let asd=func_api.in5out4(ans);
+		asd=func_api.check_in(asd);
+		tmp=asd.subarray(8,asd[1]);
+		let tmp1=[];
+		for(let i=0; i<tmp.length; i++){
+			let sh= new Uint8Array([0x1]);
+			let k;
+			if(tmp[i]){
+				for(let j=0; j<8; j++){
+					k=tmp[i]&sh;
+					if(k){
+						tmp1.push(i*8+k+1);
+					}
+					sh=sh<<1;
+				}
+			}
+		}
+		obj.ansver=tmp1;
+		in_api.out(obj);
+	},
+	*controller_details(obj){	
+		obj.cmd_id++;
+		let bfull = new Uint8Array([0x20, 0x00, 0x00, obj.lic_num, obj.cmd_id, 0x00, obj.controller_addr, 0x00, 0x00, 0x00, 0x00, 0x0D] );
+		let ttt=bfull.subarray(1,9);
+		let tmp=func_api.check_out(ttt);
+		let tmp2=func_api.in4out5(tmp);
+		bfull.set(tmp2,1);
+		obj.socket.write(bfull);
+		yield "controller_details"
+		let ans=obj.data.subarray(1,obj.data.length-1);
+		let asd=func_api.in5out4(ans);
+		asd=func_api.check_in(asd);
+		let tmp1={};
+		tmp1.type=asd[8];
+		tmp1.size=asd[9]&3;
+		tmp1.x2=asd[9]>>2&1;
+		tmp1.wiegand=asd[9]>>3&1;
+		tmp1.join=asd[9]>>4&1;
+		tmp1.p_rzvr=asd[9]>>5&1;
+		tmp1.fv=asd[10]+"."+asd[11];
+		tmp1.as=asd[13]+"."+asd[14];
+		tmp1.rzvr=asd[12];
+		tmp1.ar=asd[15]+"."+asd[16];
+		obj.ansver=tmp1;
+		in_api.out(obj);
+	},
+	*open_door(obj){
+		obj.cmd_id++;
+		let bfull = new Uint8Array([0x1F, 0x00, 0x00, obj.lic_num, obj.cmd_id, 0x07, obj.controller_addr, 0x01, 0x00, 0x00, 0x00, 0x0D] );
+		let ttt=bfull.subarray(1,9);
+		let tmp=func_api.check_out(ttt);
+		let tmp2=func_api.in4out5(tmp);
+		bfull.set(tmp2,1);
+		obj.socket.write(bfull);
+		yield "open_door"
+		let ans=obj.data.subarray(1,obj.data.length-1);
+		let tmp1={};
+		if(ans.length>5){
+			let asd=func_api.in5out4(ans);
+			if(asd[8]==0x55){
+				tmp1.result=1;
+			}else{
+				tmp1.result=0;
+			}
+			tmp1.repit=asd[9];
+		}else{
+			tmp1=String(ans);
+		}
+		obj.ansver=tmp1;
+		in_api.out(obj);
+	},
+	
 	get_converters(){
 		let asd=[];
 		for(let key in converters){
@@ -347,13 +446,17 @@ let out_api={
 	get_converters(req, res, data, obj){
 		func_api.answer_send(res, in_api.get_converters());
 	},
+	seek(req, res, data, obj){
+		broadcastNew();
+		func_api.answer_send(res, "seek send");
+	},
 	//команды работы с конвертером  запускаем через конвеер
 	*read_lic(param){
 		obj=converters[param.params.data.conv];
 		in_api.add_stack(obj, in_api.read_lic);
 		yield "read_lic"
 		func_api.answer_send(obj.params.res, obj.ansver);
-		yield "end"
+		in_api.out(obj);
 	},	
 	*install_lic(param){
 		obj=converters[param.params.data.conv];
@@ -362,8 +465,35 @@ let out_api={
 		in_api.add_stack(obj, in_api.install_lic);
 		yield "install_lic"
 		func_api.answer_send(obj.params.res, obj.ansver);
-		yield "end"
+		in_api.out(obj);
 	},
+	*controllers_list(param){
+		obj=converters[param.params.data.conv];
+		in_api.add_stack(obj, in_api.controllers_list);
+		yield "controllers_list"
+		func_api.answer_send(obj.params.res, obj.ansver);
+		in_api.out(obj);
+	},
+	*controller_details(param){
+		obj=converters[param.params.data.conv];
+		obj.controller_addr=param.params.data.controller_addr;
+		in_api.add_stack(obj, in_api.controller_details);
+		yield "controller_details"
+		func_api.answer_send(obj.params.res, obj.ansver);
+		in_api.out(obj);
+	},
+	*open_door(param){
+		obj=converters[param.params.data.conv];
+		obj.controller_addr=param.params.data.controller_addr;
+		in_api.add_stack(obj, in_api.open_door);
+		yield "open_door"
+		if(obj.err){
+			obj.ansver.err=obj.err;
+		}
+		func_api.answer_send(obj.params.res, obj.ansver);
+		in_api.out(obj);
+	},
+	
 };
 let func_api={
 	full_info(){
@@ -458,14 +588,19 @@ let func_api={
 		return buffer;
 	},
 	check_in(buffer){ //расчет длины и контрольной суммы на FF
-		buffer[1]=buffer.byteLength;
+		//buffer[1]=buffer.byteLength;
 		let c_summ=0;
 		for(let i=0;i<buffer[1];i++){
 			c_summ=c_summ+Number(buffer[i]);
 		}
-		let c_summ_b = c_summ&0x0F;
-		buffer[0]=0xFF-c_summ_b;
-		return buffer;
+		let c_summ_b = c_summ&0xFF;
+		if(c_summ_b!=0xFF){
+			tmp=0;
+		}else{
+			tmp=1;
+		}
+		//let tmp=buffer.subarray(0,buffer[1]);
+		return tmp;
 	},
 	answer(obj){
 		obj.stack[obj.stack.length-1].next(); //заранее записана функция обработчик ответа

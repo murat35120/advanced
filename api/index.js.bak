@@ -212,12 +212,12 @@ let in_api={
 		}
 	},
 	out_from_timer(obj){
-		//while(obj.stack.length>1){
-		//	obj.stack.pop();
-		//}
+		//obj.stack.splice(1);
+		while(obj.stack.length>1){
+			obj.stack.pop();
+		}
 		obj.err={reason:"timer"};
-		obj.stack[obj.stack.length-1].next();//вызываем функцию
-		//obj.stack[0].next();//вызываем функцию
+		let ed=obj.stack[obj.stack.length-1].next();//вызываем функцию
 	},
 	add_stack(ob, funk){
 		obj.stack.push(funk(obj)); //добавляем функцию в стэк

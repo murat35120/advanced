@@ -32,7 +32,7 @@ function new_client(host_client){
 		obj.queue=new Set(); //очередь
 		obj.stack=[]; //стэк
 		obj.cmd_id=0;
-		console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
+		//console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
 		obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));
 		in_api.queue_add(obj, {}, in_api.new_sock);
 		in_api.queue_add(obj, {}, in_api.read_lic);
@@ -42,8 +42,9 @@ function new_client(host_client){
 		func_api.answer(obj);
 	});
 	client.on('close', function() {
-	console.log(obj.name+' client closed');
-	converters[obj.name].connected=false; 
+		//console.log(obj.name+' client closed');
+		//converters[obj.name].connected=false; 
+		//setTimeout(broadcastNew, 3000);
 	});
 	client.on('error', function() {
 		console.log("error client ");
@@ -56,7 +57,8 @@ function new_client(host_client){
 const server_udp = dgram.createSocket("udp4");
 server_udp.bind(function() {
     server_udp.setBroadcast(true);
-    setTimeout(broadcastNew, 3000);
+    setInterval(broadcastNew, 3000);
+    //setTimeout(broadcastNew, 3000);
 });
 server_udp.on('message', function (message, rinfo) {
 	let msg={};
@@ -75,6 +77,7 @@ server_udp.on('message', function (message, rinfo) {
 		}
 	}
 	if((msg.L1_Port==port_client)||(msg.L2_Port==port_client)){
+		//console.log(msg);
 		if((msg.L1_Conn=='0.0.0.0')&&(msg.L2_Conn=='0.0.0.0')){
 			//console.log(msg);
 			new_client(msg.from);
@@ -100,7 +103,7 @@ server.on('connection', function(sock) {
 	obj.queue=new Set(); //очередь
 	obj.stack=[]; //стэк
 	obj.cmd_id=0;
-	console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
+	//console.log('CONNECTED: ' + obj.socket.remoteAddress + ':' + obj.socket.remotePort);
 	obj.socket.write(Buffer.from([0xFF, 0xFA, 0x2C, 0x01, 0x00, 0x03, 0x84, 0x00, 0xFF, 0xF0]));//Для перевода конвертера в режим "ADVANCED" необходимо установить скорость линии 230400:
 	obj.socket.on('data', function(data) {
 		obj.data=data;
@@ -110,8 +113,8 @@ server.on('connection', function(sock) {
 		console.log("error from ");
 	});
 	obj.socket.on('close', function(data) {
-		console.log(obj.name+' server closed');
-		converters[obj.name].connected=false; 
+		//console.log(obj.name+' server closed');
+		//converters[obj.name].connected=false; 
 	});
 	in_api.queue_add(obj, {}, in_api.new_sock);
 	in_api.queue_add(obj, {}, in_api.read_lic);
@@ -185,13 +188,10 @@ let in_api={
 				obj.func=result.value.func;
 				obj.params=result.value.params;
 				obj.stack.push(result.value.func(obj)); //добавляем функцию в стэк = создаем генератор
-				obj.stack[obj.stack.length-1].next();//вызываем функцию
+				obj.stack[obj.stack.length-1].next();
 				clearTimeout(obj.tmr);//сбросили старый таймер
 				obj.tmr= setTimeout(in_api.out_from_timer, 300, obj);//новый таймер, если ответа не будет
 			}
-		}else{
-			console.log("size2  "+obj.queue.size);
-			clearTimeout(obj.tmr);//сбросили старый таймер
 		}
 	},
 	queue_add(obj, params, func){
@@ -212,12 +212,10 @@ let in_api={
 		}
 	},
 	out_from_timer(obj){
-		//while(obj.stack.length>1){
-		//	obj.stack.pop();
-		//}
 		obj.err={reason:"timer"};
-		obj.stack[obj.stack.length-1].next();//вызываем функцию
-		//obj.stack[0].next();//вызываем функцию
+		if(obj.stack[obj.stack.length-1].next().done){ //заранее записана функция обработчик ответа
+			in_api.out(obj);
+		}
 	},
 	add_stack(ob, funk){
 		obj.stack.push(funk(obj)); //добавляем функцию в стэк
@@ -225,15 +223,12 @@ let in_api={
 	},
 	*new_sock(obj) {
 		let timerId = setTimeout(()=>obj.stack[obj.stack.length-1].next(), 100);
-		//console.log("start 1 ");
-		yield "start";
+		yield 1
 		obj.socket.write(func_api.full_info());
-		//console.log("start 2 ");
-		yield "read full_info"
+		yield 2
 		obj.full_info=String(obj.data);
 		obj.socket.write(func_api.short_info());
-		//console.log("start 3 ");
-		yield "read short_info"
+		yield 3
 		if(obj.data.length){//парсим информацию о конвертере
 			let arr = String(obj.data).split(' ');
 			obj.model=arr[0];
@@ -255,41 +250,17 @@ let in_api={
 			return;
 		}
 		obj.socket.write(func_api.license_list());
-		//console.log("start 4 ");
-		yield "read license_list"
-		let arr = String(obj.data).split('LIC: ');
-		let lic={};
-		if(arr.length){
-			for (i=0; i<arr.length; i++){
-				if(arr[i].length){
-					let ss=arr[i].split(' ');
-					if(Number(ss[0])){
-						lic.type=Number(ss[0]);
-						lic.controllers=ss[1].split('/')[0].split('(')[1];
-						lic.cards=ss[1].split('/')[1].split(')')[0];
-					}
-				}
-			}
-		}
-		obj.lic=lic;
+		yield 4
+		obj.lic = func_api.parse_license_list(obj.data);
+		//console.log(String(obj.data));
+		//console.log(obj.lic);
 		obj.lic_num=new Uint8Array([0x08]);
-		//obj.stack.pop(); //удаляем запись из стэка
 		let name=obj.model+"_"+obj.number;
 		obj.name=name;
-		obj.connected=true;
-		if( name in converters){
-			converters[name]=obj;
-		}else{
-			if(name.includes("397")){
-				//создаем декоратор
-			}else{
-				//создаем декоратор
-			}
-			converters[name]=obj; 
+		if( !(name in converters)){
+			console.log("new "+name);			
 		}	
-		console.log("new "+name);
-		in_api.out(obj);
-		yield "end"
+		converters[name]=obj;
 	},
 	*read_lic(obj){
 		let bstart = new Uint8Array([0x1E]);  //создаем first
@@ -304,18 +275,11 @@ let in_api={
 		bfull.set(tmp2,1);
 		bfull.set(bend,11);
 		obj.socket.write(bfull);
-		yield "read_lic"
+		yield 1
 		let ans=obj.data.subarray(1,obj.data.length-1);
-		//console.log(ans);
 		let asd=func_api.in5out4(ans);
-		//if(func_api.check_in(asd) && asd[1]==obj.cmd_id){
-			obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
-			//obj.stack.pop(); //удаляем запись из стэка
-			let name=obj.model+"_"+obj.number;
-			//console.log("start  "+name);
-			in_api.out(obj);
-		//}
-		yield "end"
+		obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
+		let name=obj.model+"_"+obj.number;
 	},
 	*install_lic(obj){
 		let bfull = new Uint8Array(47);
@@ -346,13 +310,12 @@ let in_api={
 		bfull.set(tmp2,1);
 		bfull.set(bend,46);
 		obj.socket.write(bfull);
-		yield "install_lic"
+		console.log(lic_full);
+		yield 1
 		let ans=obj.data.subarray(1,obj.data.length-1);
 		let asd=func_api.in5out4(ans);
 		asd=func_api.check_in(asd);
 		obj.ansver={controllers:asd[5],cards:(256*asd[7]+asd[6])};
-		in_api.out(obj);
-		yield "end"
 	},
 	*controllers_list(obj){//(req, res, conv, lic_num, func){	
 		obj.cmd_id++;
@@ -362,10 +325,12 @@ let in_api={
 		let tmp2=func_api.in4out5(tmp);
 		bfull.set(tmp2,1);
 		obj.socket.write(bfull);
-		yield "controllers_list"
+		yield 1
 		let ans=obj.data.subarray(1,obj.data.length-1);
 		let asd=func_api.in5out4(ans);
-		asd=func_api.check_in(asd);
+		if(!func_api.check_in(asd)){
+			console.log("wrong check value");
+		}
 		tmp=asd.subarray(8,asd[1]);
 		let tmp1=[];
 		for(let i=0; i<tmp.length; i++){
@@ -382,7 +347,6 @@ let in_api={
 			}
 		}
 		obj.ansver=tmp1;
-		in_api.out(obj);
 	},
 	*controller_details(obj){	
 		obj.cmd_id++;
@@ -392,7 +356,7 @@ let in_api={
 		let tmp2=func_api.in4out5(tmp);
 		bfull.set(tmp2,1);
 		obj.socket.write(bfull);
-		yield "controller_details"
+		yield 1
 		let ans=obj.data.subarray(1,obj.data.length-1);
 		let asd=func_api.in5out4(ans);
 		asd=func_api.check_in(asd);
@@ -408,7 +372,6 @@ let in_api={
 		tmp1.rzvr=asd[12];
 		tmp1.ar=asd[15]+"."+asd[16];
 		obj.ansver=tmp1;
-		in_api.out(obj);
 	},
 	*open_door(obj){
 		obj.cmd_id++;
@@ -418,7 +381,7 @@ let in_api={
 		let tmp2=func_api.in4out5(tmp);
 		bfull.set(tmp2,1);
 		obj.socket.write(bfull);
-		yield "open_door"
+		yield 1
 		let ans=obj.data.subarray(1,obj.data.length-1);
 		let tmp1={};
 		if(ans.length>5){
@@ -433,7 +396,6 @@ let in_api={
 			tmp1=String(ans);
 		}
 		obj.ansver=tmp1;
-		in_api.out(obj);
 	},
 	
 	get_converters(){
@@ -456,44 +418,39 @@ let out_api={
 	*read_lic(param){
 		obj=converters[param.params.data.conv];
 		in_api.add_stack(obj, in_api.read_lic);
-		yield "read_lic"
+		yield 1
 		func_api.answer_send(obj.params.res, obj.ansver);
-		in_api.out(obj);
 	},	
 	*install_lic(param){
 		obj=converters[param.params.data.conv];
 		obj.lic_num=param.params.data.lic_num;
 		obj.lic_text=param.params.data.lic_text;
 		in_api.add_stack(obj, in_api.install_lic);
-		yield "install_lic"
+		yield 1
 		func_api.answer_send(obj.params.res, obj.ansver);
-		in_api.out(obj);
 	},
 	*controllers_list(param){
 		obj=converters[param.params.data.conv];
 		in_api.add_stack(obj, in_api.controllers_list);
-		yield "controllers_list"
+		yield 1
 		func_api.answer_send(obj.params.res, obj.ansver);
-		in_api.out(obj);
 	},
 	*controller_details(param){
 		obj=converters[param.params.data.conv];
 		obj.controller_addr=param.params.data.controller_addr;
 		in_api.add_stack(obj, in_api.controller_details);
-		yield "controller_details"
+		yield 1
 		func_api.answer_send(obj.params.res, obj.ansver);
-		in_api.out(obj);
 	},
 	*open_door(param){
 		obj=converters[param.params.data.conv];
 		obj.controller_addr=param.params.data.controller_addr;
 		in_api.add_stack(obj, in_api.open_door);
-		yield "open_door"
+		yield 1
 		if(obj.err){
 			obj.ansver.err=obj.err;
 		}
 		func_api.answer_send(obj.params.res, obj.ansver);
-		in_api.out(obj);
 	},
 	
 };
@@ -605,8 +562,44 @@ let func_api={
 		return tmp;
 	},
 	answer(obj){
-		obj.stack[obj.stack.length-1].next(); //заранее записана функция обработчик ответа
+		if(obj.stack[obj.stack.length-1].next().done){ //заранее записана функция обработчик ответа
+			in_api.out(obj);
+		}
 	},
+	parse_license_list(data){
+		let lic={};
+		if(data.includes("LIC")){
+			let arr = String(data).split('LIC: ');
+			if(arr.length){
+				for (i=0; i<arr.length; i++){
+					if(arr[i].length){
+						let ss=arr[i].split(' ');
+						if(Number(ss[0])){
+							lic[Number(ss[0])]={}
+							//lic.type=Number(ss[0]);
+							lic[Number(ss[0])].controllers=ss[1].split('/')[0].split('(')[1];
+							lic[Number(ss[0])].cards=ss[1].split('/')[1].split(')')[0];
+						}
+					}
+				}
+			}
+		}else{
+			let arr = String(data).split(' ');
+			if(arr.length){
+				for (i=0; i<arr.length; i++){
+					if(data.includes("(")){
+						let ss=arr[i].split('(');
+						if(Number(ss[0])){
+							lic[Number(ss[0])]={}
+							lic[Number(ss[0])].controllers=ss[1].split('/')[0].split('(')[0];
+							lic[Number(ss[0])].cards=ss[1].split('/')[1].split(')')[0];
+						}
+					}
+				}
+			}
+		}
+		return lic;
+	}
 };
 
 
